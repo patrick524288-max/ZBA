@@ -14,7 +14,11 @@ from pathlib import Path
 
 import pdfplumber
 
-PDF_ROOT = Path(__file__).parent / "pdfs" / "Zoning_Board"
+PDF_ROOT = Path(__file__).parent / "pdfs"
+BOARDS = {
+    "Zoning_Board": "ZBA",
+    "Planning_Board": "PB",
+}
 OUTPUT = Path(__file__).parent / "applications.json"
 
 MEETING_DATE_RE = re.compile(
@@ -80,6 +84,7 @@ VARIANCE_TYPE_RE = re.compile(
 @dataclass
 class Application:
     source_pdf: str
+    board: str  # "ZBA" or "PB"
     meeting_date: str | None
     year: int | None
     label: str  # "A", "B", etc.
@@ -183,7 +188,17 @@ def extract_fields(body: str) -> dict:
     return d
 
 
-def process_pdf(path: Path) -> list[Application]:
+def folder_year(path: Path) -> int | None:
+    """Infer year from the folder path (pdfs/Zoning_Board/YYYY/...).
+    Used as authoritative fallback when OCR mangles the in-text date.
+    """
+    for part in path.parts:
+        if re.fullmatch(r"20\d{2}|19\d{2}", part):
+            return int(part)
+    return None
+
+
+def process_pdf(path: Path, board: str) -> list[Application]:
     try:
         with pdfplumber.open(path) as pdf:
             pages = [p.extract_text() or "" for p in pdf.pages]
@@ -193,6 +208,11 @@ def process_pdf(path: Path) -> list[Application]:
     text = "\n".join(pages)
 
     meeting_date, year = parse_meeting_date(text)
+    fyear = folder_year(path)
+    if fyear and (year is None or not (2010 <= year <= 2030)):
+        year = fyear
+        if meeting_date and not meeting_date.startswith(str(fyear)):
+            meeting_date = None
     apps = []
     for label, name, body in split_applications(text):
         fields = extract_fields(body)
@@ -200,7 +220,8 @@ def process_pdf(path: Path) -> list[Application]:
         if "street" not in fields and "tax_map" not in fields:
             warnings.append("no_location")
         app = Application(
-            source_pdf=str(path.relative_to(PDF_ROOT.parent.parent)),
+            source_pdf=str(path.relative_to(PDF_ROOT.parent)),
+            board=board,
             meeting_date=meeting_date,
             year=year,
             label=label,
@@ -214,23 +235,32 @@ def process_pdf(path: Path) -> list[Application]:
 
 
 def main():
-    pdfs = sorted(PDF_ROOT.rglob("*.pdf"))
-    print(f"Found {len(pdfs)} ZBA PDFs")
     all_apps: list[Application] = []
-    n_with_loc = 0
-    for path in pdfs:
-        apps = process_pdf(path)
-        for a in apps:
-            if a.street or a.tax_map:
-                n_with_loc += 1
-        all_apps.extend(apps)
-        print(f"  {path.name}: {len(apps)} applications "
-              f"(meeting {apps[0].meeting_date if apps else 'unknown'})")
+    total_with_loc = 0
+    for folder, board in BOARDS.items():
+        root = PDF_ROOT / folder
+        if not root.exists():
+            print(f"Skipping {folder} (not found)")
+            continue
+        pdfs = sorted(root.rglob("*.pdf"))
+        print(f"\n=== {board} ({folder}): {len(pdfs)} PDFs ===")
+        n_apps = 0
+        n_loc = 0
+        for path in pdfs:
+            apps = process_pdf(path, board)
+            for a in apps:
+                if a.street or a.tax_map:
+                    n_loc += 1
+            n_apps += len(apps)
+            all_apps.extend(apps)
+        total_with_loc += n_loc
+        print(f"  {board}: {n_apps} applications, {n_loc} with location "
+              f"({100*n_loc/max(n_apps,1):.0f}%)")
 
     OUTPUT.write_text(json.dumps([asdict(a) for a in all_apps], indent=2))
-    print(f"\nWrote {len(all_apps)} applications to {OUTPUT}")
-    print(f"  {n_with_loc} have a street or tax map reference "
-          f"({100*n_with_loc/max(len(all_apps),1):.0f}%)")
+    print(f"\nWrote {len(all_apps)} total applications to {OUTPUT}")
+    print(f"  {total_with_loc}/{len(all_apps)} have a location "
+          f"({100*total_with_loc/max(len(all_apps),1):.0f}%)")
 
 
 if __name__ == "__main__":

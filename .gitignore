@@ -10,6 +10,10 @@ __pycache__/
 FINDINGS.md
 memory/
 
+# Secrets
+.env
+.env.*
+
 # Regeneratable artifacts
 geocode_cache.json
 applications.json

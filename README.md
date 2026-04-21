@@ -7,7 +7,7 @@ The pipeline extracts structured records from ZBA meeting-minutes PDFs, geocodes
 ## Quick start
 
 ```bash
-# 1. Install deps
+# 1. Install deps (also requires system tesseract for OCR: `brew install tesseract`)
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 
@@ -15,27 +15,33 @@ python3 -m venv .venv
 #    (available from the Village of Woodbury website)
 
 # 3. Run the pipeline
+.venv/bin/python ocr.py            # OCRs scanned PDFs in place (idempotent)
 .venv/bin/python extract_zba.py    # → applications.json
 .venv/bin/python geocode.py        # → applications_geocoded.json
 
-# 4. Serve the viewer
-python3 -m http.server 8765
+# 4. Serve the viewer (with chat)
+export ANTHROPIC_API_KEY=sk-ant-...   # for the chat feature
+.venv/bin/python chat_server.py
 # open http://localhost:8765
+
+# Without a Claude API key the map works but /chat returns an error.
+# Fallback without chat: python3 -m http.server 8765
 ```
 
 ## Files
 
 | File | Purpose |
 |---|---|
-| `extract_zba.py` | Parse ZBA PDFs, extract application records (date, label, name, address, tax map, zoning district, request type). Outputs `applications.json`. |
+| `ocr.py` | Add a text layer to scanned/image-only PDFs with `ocrmypdf --skip-text`. Idempotent; runs in place. Needed for 2014–2018 minutes which were scanned rather than born-digital. |
+| `extract_zba.py` | Parse ZBA PDFs, extract application records (date, label, name, address, tax map, zoning district, request type). Falls back to folder-path year when OCR mangles the in-text date. Outputs `applications.json`. |
 | `geocode.py` | Geocode each unique address via Nominatim. Caches results. Outputs `applications_geocoded.json`. |
-| `index.html` | Static Leaflet viewer with year-range slider. Loads `applications_geocoded.json`. No build step. |
+| `index.html` | Static Leaflet viewer with year-range slider, per-board toggles, and chat panel. Loads `applications_geocoded.json`. No build step. |
+| `chat_server.py` | Serves the static viewer and a `/chat` endpoint. Retrieves relevant applications by keyword/entity/address match, calls Claude Opus 4.7 with the retrieved context, returns the answer + citations. Requires `ANTHROPIC_API_KEY`. |
 | `applications_geocoded.json` | Shipped data snapshot so the viewer works without re-running the pipeline. |
 
 ## Known limitations
 
-- **OCR needed for 2014–2016 and 2018 minutes** — those PDFs are scanned images that `pdfplumber` can't extract. Gaps show in the timeline.
-- **~45% of extracted records map to coordinates.** Rest either lack a street address in the minutes (decision-review sections, concatenated parcels) or reference tax maps only. Tax-map-to-parcel geocoding would require Orange County GIS data.
+- **~52% of extracted records map to coordinates.** Rest either lack a street address in the minutes (decision-review sections, concatenated parcels) or reference tax maps only. Tax-map-to-parcel geocoding would require Orange County GIS data.
 - **Applicant name is the section label, often a last name.** LLC / full-name resolution is future work.
 
 ## Data source
