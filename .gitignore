@@ -1,0 +1,21 @@
+# Source PDFs (public records, too large for git; fetch locally)
+pdfs/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Local analysis / commercially sensitive
+FINDINGS.md
+memory/
+
+# Regeneratable artifacts
+geocode_cache.json
+applications.json
+
+# OS / editor
+.DS_Store
+.claude/
+.vscode/
+.idea/

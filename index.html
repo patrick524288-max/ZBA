@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Woodbury ZBA Applications</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+  integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<style>
+  :root {
+    --bg: #0f1216;
+    --panel: #1a1f26;
+    --text: #e6ebf2;
+    --muted: #8a95a5;
+    --accent: #ff6b35;
+    --accent-dim: rgba(255,107,53,0.2);
+    --border: #2b3340;
+  }
+  html, body { margin: 0; height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+  #app { display: flex; flex-direction: column; height: 100vh; }
+  header { padding: 14px 20px; background: var(--panel); border-bottom: 1px solid var(--border); display: flex; align-items: baseline; gap: 16px; }
+  header h1 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+  header .sub { color: var(--muted); font-size: 13px; }
+  header .count { margin-left: auto; color: var(--accent); font-variant-numeric: tabular-nums; font-size: 13px; }
+  #map { flex: 1; background: #0a0d11; }
+  #controls { padding: 16px 24px 20px; background: var(--panel); border-top: 1px solid var(--border); }
+  .slider-wrap { position: relative; height: 40px; }
+  .slider-wrap input[type=range] { position: absolute; width: 100%; top: 14px; margin: 0; pointer-events: none; -webkit-appearance: none; background: transparent; }
+  .slider-wrap input[type=range]::-webkit-slider-thumb {
+    pointer-events: auto; -webkit-appearance: none;
+    width: 18px; height: 18px; border-radius: 50%;
+    background: var(--accent); border: 2px solid #0f1216; cursor: pointer; margin-top: -8px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+  }
+  .slider-wrap input[type=range]::-moz-range-thumb {
+    pointer-events: auto; width: 18px; height: 18px; border-radius: 50%;
+    background: var(--accent); border: 2px solid #0f1216; cursor: pointer;
+  }
+  .track { position: absolute; left: 0; right: 0; top: 22px; height: 3px; background: var(--border); border-radius: 3px; }
+  .track-active { position: absolute; top: 22px; height: 3px; background: var(--accent); border-radius: 3px; }
+  .labels { display: flex; justify-content: space-between; margin-top: 4px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .readout { text-align: center; margin-top: 6px; font-size: 13px; font-weight: 500; }
+  .readout b { color: var(--accent); font-variant-numeric: tabular-nums; }
+  .tick { position: absolute; top: 20px; width: 1px; height: 7px; background: var(--border); }
+  .popup-inner { font-size: 13px; line-height: 1.5; }
+  .popup-inner .name { font-weight: 600; font-size: 14px; margin-bottom: 4px; }
+  .popup-inner .meta { color: var(--muted); margin-bottom: 6px; font-size: 12px; }
+  .popup-inner .desc { max-height: 140px; overflow: auto; }
+  /* Leaflet popup theme override */
+  .leaflet-popup-content-wrapper { background: #1a1f26; color: var(--text); border: 1px solid var(--border); }
+  .leaflet-popup-tip { background: #1a1f26; }
+  .leaflet-popup-content { margin: 10px 14px; }
+  .leaflet-container { background: #0a0d11; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Village of Woodbury — ZBA Applications</h1>
+    <span class="sub">filter by meeting year</span>
+    <span class="count" id="count">— of —</span>
+  </header>
+  <div id="map"></div>
+  <div id="controls">
+    <div class="slider-wrap" id="slider">
+      <div class="track"></div>
+      <div class="track-active" id="track-active"></div>
+      <input type="range" id="min" />
+      <input type="range" id="max" />
+    </div>
+    <div class="labels" id="tick-labels"></div>
+    <div class="readout">Showing <b id="readout-range"></b></div>
+  </div>
+</div>
+
+<script>
+(async () => {
+  const res = await fetch("applications_geocoded.json");
+  const data = await res.json();
+  const mapped = data.filter(a => a.lat && a.lon);
+
+  const years = [...new Set(mapped.map(a => a.year).filter(Boolean))].sort();
+  const minYear = years[0];
+  const maxYear = years[years.length - 1];
+
+  const map = L.map("map", { zoomControl: true }).setView([41.338, -74.110], 13);
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
+    subdomains: "abcd",
+    maxZoom: 20,
+  }).addTo(map);
+
+  const layer = L.layerGroup().addTo(map);
+
+  const makeMarker = (a) => {
+    const m = L.circleMarker([a.lat, a.lon], {
+      radius: 7,
+      fillColor: "#ff6b35",
+      color: "#0f1216",
+      weight: 1.5,
+      fillOpacity: 0.85,
+    });
+    const desc = (a.raw_block || "").slice(0, 480).replace(/\s+/g, " ");
+    m.bindPopup(`
+      <div class="popup-inner">
+        <div class="name">${escapeHtml(a.name)}</div>
+        <div class="meta">${a.meeting_date} · ${escapeHtml(a.locality || "")} · ${escapeHtml(a.zoning_district || "")}</div>
+        <div class="meta">${escapeHtml(a.street || "")} ${a.tax_map ? "· tax map " + a.tax_map : ""}</div>
+        <div class="meta">${escapeHtml(a.request_type || "")}</div>
+        <div class="desc">${escapeHtml(desc)}${desc.length >= 480 ? "…" : ""}</div>
+      </div>`);
+    return m;
+  };
+
+  function escapeHtml(s) {
+    return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  const minEl = document.getElementById("min");
+  const maxEl = document.getElementById("max");
+  const readoutEl = document.getElementById("readout-range");
+  const countEl = document.getElementById("count");
+  const trackActive = document.getElementById("track-active");
+  const tickLabels = document.getElementById("tick-labels");
+
+  // Populate year ticks
+  years.forEach(y => {
+    const s = document.createElement("span");
+    s.textContent = y;
+    tickLabels.appendChild(s);
+  });
+
+  for (const el of [minEl, maxEl]) {
+    el.min = minYear; el.max = maxYear; el.step = 1;
+  }
+  minEl.value = minYear;
+  maxEl.value = maxYear;
+
+  function render() {
+    let lo = parseInt(minEl.value, 10);
+    let hi = parseInt(maxEl.value, 10);
+    if (lo > hi) { const t = lo; lo = hi; hi = t; }
+
+    layer.clearLayers();
+    const visible = mapped.filter(a => a.year >= lo && a.year <= hi);
+    visible.forEach(a => makeMarker(a).addTo(layer));
+
+    readoutEl.textContent = lo === hi ? `${lo}` : `${lo} – ${hi}`;
+    countEl.textContent = `${visible.length} of ${mapped.length}`;
+
+    // Paint the active range on the track
+    const span = maxYear - minYear || 1;
+    const leftPct = ((lo - minYear) / span) * 100;
+    const rightPct = ((hi - minYear) / span) * 100;
+    trackActive.style.left = leftPct + "%";
+    trackActive.style.right = (100 - rightPct) + "%";
+  }
+
+  minEl.addEventListener("input", render);
+  maxEl.addEventListener("input", render);
+  render();
+})();
+</script>
+</body>
+</html>
