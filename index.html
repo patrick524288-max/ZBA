@@ -176,9 +176,18 @@
 
 <script>
 (async () => {
-  const res = await fetch("applications_geocoded.json");
-  const data = await res.json();
+  const [data, pdfUrls] = await Promise.all([
+    fetch("applications_geocoded.json").then(r => r.json()),
+    fetch("pdf_urls.json").then(r => r.ok ? r.json() : {}).catch(() => ({})),
+  ]);
   const mapped = data.filter(a => a.lat && a.lon);
+
+  function pdfUrlFor(app) {
+    const src = app.source_pdf || "";
+    // source_pdf is like "pdfs/Zoning_Board/2024/zba2024-0410-minutes.pdf"
+    const m = src.match(/([^/]+)\.pdf$/i);
+    return m && pdfUrls[m[1]] ? pdfUrls[m[1]] : null;
+  }
 
   const years = [...new Set(mapped.map(a => a.year).filter(Boolean))].sort();
   const minYear = years[0];
@@ -260,12 +269,17 @@
     });
     const desc = (a.raw_block || "").slice(0, 480).replace(/\s+/g, " ");
     const boardTag = `<span style="color:${color};font-weight:600">${BOARD_LABEL[a.board] || a.board}</span>`;
+    const url = pdfUrlFor(a);
+    const pdfLink = url
+      ? `<div class="meta"><a href="${url}" target="_blank" rel="noopener" style="color:${color};text-decoration:underline">Open source PDF ↗</a></div>`
+      : "";
     m.bindPopup(`
       <div class="popup-inner">
         <div class="name">${escapeHtml(a.name)}</div>
         <div class="meta">${boardTag} · ${a.meeting_date || "—"} · ${escapeHtml(a.locality || "")} ${a.zoning_district ? "· " + escapeHtml(a.zoning_district) : ""}</div>
         <div class="meta">${escapeHtml(a.street || "")} ${a.tax_map ? "· tax map " + a.tax_map : ""}</div>
         <div class="meta">${escapeHtml(a.request_type || "")}</div>
+        ${pdfLink}
         <div class="desc">${escapeHtml(desc)}${desc.length >= 480 ? "…" : ""}</div>
       </div>`);
     return m;
@@ -402,10 +416,14 @@
       const board = c.board || "?";
       const label = `${c.meeting_date || c.year || "?"} · ${c.name || "(unnamed)"}`;
       const loc = [c.street, c.locality].filter(Boolean).join(", ");
-      return `<a data-idx="${i}">
+      const url = pdfUrlFor(c);
+      const pdfIcon = url
+        ? ` <a href="${url}" target="_blank" rel="noopener" title="Open source PDF" style="color:var(--accent);text-decoration:none;padding-left:4px;">↗</a>`
+        : "";
+      return `<div><a data-idx="${i}">
         <span class="citation-board ${board}">${board}</span>
         ${escapeHtml(label)}${loc ? ` <span style="color:var(--muted)"> — ${escapeHtml(loc)}</span>` : ""}
-      </a>`;
+      </a>${pdfIcon}</div>`;
     }).join("");
     return `<div class="chat-citations"><div class="label">Sources (${citations.length})</div>${items}</div>`;
   }
