@@ -6,9 +6,11 @@
 <title>Woodbury ZBA Applications</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
   integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<link rel="stylesheet" href="chat.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
   integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 <script src="https://unpkg.com/leaflet-imageoverlay-rotated@0.2.1/Leaflet.ImageOverlay.Rotated.js"></script>
+<script defer src="chat.js"></script>
 <style>
   :root {
     --bg: #0f1216;
@@ -30,6 +32,7 @@
   .legend .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; vertical-align: middle; border: 1.5px solid #0f1216; }
   .legend .zba { background: #ff6b35; }
   .legend .pb { background: #4da6ff; }
+  .legend .pink { background: #ff3e9a; }
   .legend label { cursor: pointer; user-select: none; }
   .legend input { margin-right: 4px; vertical-align: middle; accent-color: var(--accent); }
   #map { flex: 1; background: #0a0d11; }
@@ -62,76 +65,40 @@
   .leaflet-popup-content { margin: 10px 14px; }
   .leaflet-container { background: #0a0d11; }
 
-  /* --- Chat panel --- */
-  #chat-toggle {
-    position: fixed; bottom: 110px; right: 24px; z-index: 500;
-    width: 52px; height: 52px; border-radius: 50%;
-    background: var(--accent); color: #0f1216; border: none;
-    font-size: 22px; font-weight: 600; cursor: pointer;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
-    display: flex; align-items: center; justify-content: center;
-    transition: transform 0.15s;
-  }
-  #chat-toggle:hover { transform: scale(1.05); }
-  #chat-toggle.hidden { display: none; }
+  /* Chat UI loaded from chat.css (shared with trends.html) */
 
-  #chat-panel {
-    position: fixed; bottom: 110px; right: 24px; z-index: 500;
-    width: 400px; height: min(560px, calc(100vh - 200px));
-    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
-    display: none; flex-direction: column; overflow: hidden;
+  /* Annotations */
+  #add-annotation {
+    position: fixed; bottom: 180px; right: 24px; z-index: 500;
+    width: 44px; height: 44px; border-radius: 50%;
+    background: #ff3e9a; color: #0f1216; border: none;
+    font-size: 24px; font-weight: 700; cursor: pointer;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+    display: flex; align-items: center; justify-content: center; line-height: 1;
+  }
+  #add-annotation:hover { transform: scale(1.05); }
+  #annotation-form {
+    position: fixed; bottom: 180px; right: 80px; z-index: 600;
+    width: 320px; background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px; display: none;
     box-shadow: 0 8px 32px rgba(0,0,0,0.6);
   }
-  #chat-panel.open { display: flex; }
-  #chat-header {
-    padding: 12px 16px; border-bottom: 1px solid var(--border);
-    display: flex; align-items: center; gap: 10px;
+  #annotation-form.open { display: block; }
+  #annotation-form h3 { margin: 0 0 10px; font-size: 14px; }
+  #annotation-form label { display: block; font-size: 11px; color: var(--muted); margin: 8px 0 3px; }
+  #annotation-form input, #annotation-form textarea {
+    width: 100%; background: #0f1216; border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); padding: 6px 8px; font: inherit; font-size: 13px; box-sizing: border-box; outline: none;
   }
-  #chat-header h2 { margin: 0; font-size: 14px; font-weight: 600; flex: 1; }
-  #chat-close {
-    background: none; border: none; color: var(--muted); font-size: 20px;
-    cursor: pointer; padding: 0; width: 24px; height: 24px; line-height: 1;
+  #annotation-form input:focus, #annotation-form textarea:focus { border-color: #ff3e9a; }
+  #annotation-form textarea { resize: vertical; min-height: 50px; }
+  #annotation-form .row { display: flex; gap: 8px; margin-top: 12px; justify-content: flex-end; }
+  #annotation-form button {
+    background: #ff3e9a; color: #0f1216; border: none; border-radius: 6px;
+    padding: 6px 14px; font-weight: 600; cursor: pointer;
   }
-  #chat-close:hover { color: var(--text); }
-  #chat-messages {
-    flex: 1; overflow-y: auto; padding: 14px 16px;
-    display: flex; flex-direction: column; gap: 12px;
-    font-size: 13px; line-height: 1.55;
-  }
-  .chat-msg { padding: 10px 12px; border-radius: 10px; word-wrap: break-word; }
-  .chat-msg.user { background: var(--accent-dim); border: 1px solid rgba(255,107,53,0.3); align-self: flex-end; max-width: 85%; }
-  .chat-msg.assistant { background: #12161c; border: 1px solid var(--border); }
-  .chat-msg.error { background: rgba(255, 80, 80, 0.1); border: 1px solid rgba(255, 80, 80, 0.3); color: #ffc9c9; }
-  .chat-msg.system { color: var(--muted); font-size: 12px; font-style: italic; text-align: center; }
-  .chat-msg p { margin: 0 0 8px; }
-  .chat-msg p:last-child { margin-bottom: 0; }
-  .chat-citations { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 11px; }
-  .chat-citations .label { color: var(--muted); margin-bottom: 4px; }
-  .chat-citations a { color: var(--accent); text-decoration: none; cursor: pointer; display: block; margin-bottom: 3px; }
-  .chat-citations a:hover { text-decoration: underline; }
-  .citation-board { display: inline-block; width: 34px; font-size: 10px; font-weight: 600; text-transform: uppercase; opacity: 0.8; }
-  .citation-board.ZBA { color: #ff6b35; }
-  .citation-board.PB { color: #4da6ff; }
-  #chat-input-wrap {
-    border-top: 1px solid var(--border); padding: 10px 12px;
-    display: flex; gap: 8px; align-items: flex-end;
-  }
-  #chat-input {
-    flex: 1; background: #0f1216; border: 1px solid var(--border); border-radius: 8px;
-    color: var(--text); padding: 8px 10px; font: inherit; font-size: 13px;
-    resize: none; outline: none; min-height: 36px; max-height: 120px;
-  }
-  #chat-input:focus { border-color: var(--accent); }
-  #chat-send {
-    background: var(--accent); color: #0f1216; border: none; border-radius: 8px;
-    padding: 0 14px; height: 36px; font-weight: 600; cursor: pointer;
-  }
-  #chat-send:disabled { opacity: 0.4; cursor: not-allowed; }
-  .thinking-dots::after {
-    content: "…"; display: inline-block; animation: dots 1.4s steps(4) infinite;
-    letter-spacing: 2px;
-  }
-  @keyframes dots { 0% { content: "" } 25% { content: "." } 50% { content: ".." } 75% { content: "..." } }
+  #annotation-form button.cancel { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+  #annotation-form .err { color: #ffa0a0; font-size: 12px; margin-top: 6px; min-height: 1em; }
 </style>
 </head>
 <body>
@@ -141,10 +108,12 @@
     <span class="legend">
       <label><input type="checkbox" id="toggle-zba" checked><span class="swatch zba"></span>ZBA</label>
       <label><input type="checkbox" id="toggle-pb" checked><span class="swatch pb"></span>Planning Board</label>
+      <label title="Your saved annotations"><input type="checkbox" id="toggle-ann" checked><span class="swatch pink"></span>Pins</label>
       <label title="Overlay the 2011 Village of Woodbury zoning map"><input type="checkbox" id="toggle-zoning"> Zoning</label>
       <input type="range" id="zoning-opacity" min="0.1" max="1" step="0.05" value="0.55" title="Zoning overlay opacity" style="width:70px;accent-color:var(--accent);margin-left:-6px;">
     </span>
     <span class="count" id="count">— of —</span>
+    <a href="trends.html" style="margin-left:16px;color:var(--muted);text-decoration:none;font-size:13px;padding:4px 10px;border:1px solid var(--border);border-radius:6px;">Trends →</a>
   </header>
   <div id="map"></div>
   <div id="controls">
@@ -158,6 +127,21 @@
     <div class="readout">Showing <b id="readout-range"></b></div>
   </div>
 
+  <button id="add-annotation" title="Add an annotation at an address">+</button>
+  <div id="annotation-form">
+    <h3 id="ann-title">Add annotation</h3>
+    <label>Address</label>
+    <input type="text" id="ann-address" placeholder="3 Hamilton Ave, Highland Mills, NY" autocomplete="off">
+    <label>Description</label>
+    <textarea id="ann-description" placeholder="Acquired by This iz it LLC" rows="2"></textarea>
+    <label>Date</label>
+    <input type="date" id="ann-date" autocomplete="off">
+    <div class="err" id="ann-err"></div>
+    <div class="row">
+      <button class="cancel" id="ann-cancel" type="button">Cancel</button>
+      <button id="ann-save" type="button">Save</button>
+    </div>
+  </div>
   <button id="chat-toggle" title="Ask about these minutes">💬</button>
   <div id="chat-panel">
     <div id="chat-header">
@@ -189,9 +173,11 @@
     return m && pdfUrls[m[1]] ? pdfUrls[m[1]] : null;
   }
 
-  const years = [...new Set(mapped.map(a => a.year).filter(Boolean))].sort();
-  const minYear = years[0];
-  const maxYear = years[years.length - 1];
+  // Initial year range includes application years; annotation years are unioned in after load.
+  const appYears = mapped.map(a => a.year).filter(Boolean);
+  let minYear = Math.min(...appYears);
+  let maxYear = Math.max(...appYears);
+  const years = [...new Set(appYears)].sort();
 
   const map = L.map("map", { zoomControl: true }).setView([41.338, -74.110], 13);
   L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
@@ -243,6 +229,18 @@
   });
 
   const layer = L.layerGroup().addTo(map);
+
+  // Annotations state declared early so render() can reference it on first run.
+  const annotationLayer = L.layerGroup();
+  const annotationMarkers = new Map();   // id -> marker
+  const annotationsData = new Map();     // id -> full annotation object (used for filter)
+
+  function formatAnnDate(iso) {
+    if (!iso) return "";
+    const d = new Date(iso + "T00:00:00");
+    if (isNaN(d)) return iso;
+    return d.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+  }
 
   const BOARD_COLOR = { ZBA: "#ff6b35", PB: "#4da6ff" };
   const BOARD_LABEL = { ZBA: "Zoning Board of Appeals", PB: "Planning Board" };
@@ -329,8 +327,26 @@
 
     const nZba = visible.filter(a => a.board === "ZBA").length;
     const nPb = visible.filter(a => a.board === "PB").length;
+
+    // Annotation filtering — toggle + year range
+    const annTogg = document.getElementById("toggle-ann");
+    const annOn = annTogg && annTogg.checked;
+    let nAnn = 0;
+    for (const [id, marker] of annotationMarkers) {
+      const ann = annotationsData.get(id);
+      const yearOk = !ann || !ann.year || (ann.year >= lo && ann.year <= hi);
+      const show = annOn && yearOk;
+      if (show) {
+        if (!annotationLayer.hasLayer(marker)) annotationLayer.addLayer(marker);
+        nAnn++;
+      } else if (annotationLayer.hasLayer(marker)) {
+        annotationLayer.removeLayer(marker);
+      }
+    }
+
     readoutEl.textContent = lo === hi ? `${lo}` : `${lo} – ${hi}`;
-    countEl.innerHTML = `<b>${visible.length}</b> of ${mapped.length} visible · ZBA ${nZba} · PB ${nPb}`;
+    const pinsPart = annotationMarkers.size ? ` · Pins ${nAnn}` : "";
+    countEl.innerHTML = `<b>${visible.length + nAnn}</b> visible · ZBA ${nZba} · PB ${nPb}${pinsPart}`;
 
     const span = maxYear - minYear || 1;
     const leftPct = ((lo - minYear) / span) * 100;
@@ -345,140 +361,186 @@
   togglePb.addEventListener("change", render);
   render();
 
-  // --- Chat panel ---
-  const chatToggle = document.getElementById("chat-toggle");
-  const chatPanel = document.getElementById("chat-panel");
-  const chatClose = document.getElementById("chat-close");
-  const chatMessages = document.getElementById("chat-messages");
-  const chatInput = document.getElementById("chat-input");
-  const chatSend = document.getElementById("chat-send");
+  // --- Annotations -------------------------------------------------------
+  // annotationLayer stays on the map; visibility is driven per-marker inside render().
+  annotationLayer.addTo(map);
+  const annToggle = document.getElementById("toggle-ann");
+  annToggle.addEventListener("change", render);
 
-  const openChat = () => {
-    chatPanel.classList.add("open");
-    chatToggle.classList.add("hidden");
-    chatInput.focus();
-  };
-  const closeChat = () => {
-    chatPanel.classList.remove("open");
-    chatToggle.classList.remove("hidden");
-  };
-  chatToggle.addEventListener("click", openChat);
-  chatClose.addEventListener("click", closeChat);
+  function updateCountDisplay() { render(); }
 
-  chatInput.addEventListener("input", () => {
-    chatInput.style.height = "auto";
-    chatInput.style.height = Math.min(120, chatInput.scrollHeight) + "px";
-  });
-
-  function appendMessage(role, content, opts = {}) {
-    const div = document.createElement("div");
-    div.className = `chat-msg ${role}`;
-    if (opts.raw) {
-      div.innerHTML = content;
-    } else {
-      div.textContent = content;
+  function renderAnnotation(ann) {
+    if (annotationMarkers.has(ann.id)) {
+      annotationLayer.removeLayer(annotationMarkers.get(ann.id));
     }
-    chatMessages.appendChild(div);
-    chatMessages.scrollTop = chatMessages.scrollHeight;
-    return div;
-  }
-
-  // Very light markdown: paragraphs + bullet lists.
-  function renderMarkdown(text) {
-    const safe = escapeHtml(text);
-    const lines = safe.split(/\n/);
-    const blocks = [];
-    let para = [];
-    let bullets = [];
-    const flushPara = () => {
-      if (para.length) { blocks.push(`<p>${para.join(" ")}</p>`); para = []; }
-    };
-    const flushBullets = () => {
-      if (bullets.length) { blocks.push(`<ul>${bullets.map(b => `<li>${b}</li>`).join("")}</ul>`); bullets = []; }
-    };
-    for (const line of lines) {
-      const t = line.trim();
-      if (!t) { flushPara(); flushBullets(); continue; }
-      const mBullet = t.match(/^[-*]\s+(.*)/);
-      if (mBullet) { flushPara(); bullets.push(mBullet[1]); continue; }
-      flushBullets();
-      para.push(t);
+    const m = L.circleMarker([ann.lat, ann.lon], {
+      radius: 8,
+      fillColor: "#ff3e9a",
+      color: "#0f1216",
+      weight: 1.5,
+      fillOpacity: 0.9,
+    });
+    const descHtml = ann.description ? `<div class="desc">${escapeHtml(ann.description)}</div>` : "";
+    const dateHtml = ann.date ? `<div class="meta">${escapeHtml(formatAnnDate(ann.date))}</div>` : "";
+    const btnStyle = "background:transparent;border:1px solid #ff3e9a;color:#ff3e9a;border-radius:4px;padding:3px 8px;cursor:pointer;font:inherit;font-size:11px;margin-right:6px";
+    m.bindPopup(`
+      <div class="popup-inner">
+        <div class="name" style="color:#ff3e9a">${escapeHtml(ann.address)}</div>
+        ${dateHtml}
+        ${descHtml}
+        <div class="meta" style="margin-top:8px">
+          <button data-ann-edit="${ann.id}" style="${btnStyle}">Edit</button>
+          <button data-ann-delete="${ann.id}" style="${btnStyle}">Delete</button>
+        </div>
+      </div>`);
+    m.on("popupopen", () => {
+      document.querySelector(`[data-ann-edit="${ann.id}"]`)
+        ?.addEventListener("click", () => startEdit(ann.id));
+      document.querySelector(`[data-ann-delete="${ann.id}"]`)
+        ?.addEventListener("click", () => deleteAnnotation(ann.id));
+    });
+    annotationMarkers.set(ann.id, m);
+    annotationsData.set(ann.id, ann);
+    // If annotation's year is outside the current slider range, extend the slider.
+    if (ann.year) {
+      let changed = false;
+      if (ann.year < minYear) { minYear = ann.year; changed = true; }
+      if (ann.year > maxYear) { maxYear = ann.year; changed = true; }
+      if (changed) reconfigureSlider();
     }
-    flushPara(); flushBullets();
-    // Bold citations like [ZBA 2024-04-10: 58 Quaker]
-    return blocks.join("")
-      .replace(/\[(ZBA|PB|VBoT)\s+([^\]]+?)\]/g, '<code style="background:rgba(255,107,53,0.15);padding:1px 5px;border-radius:3px;font-size:11px;">[$1 $2]</code>');
+    updateCountDisplay();
   }
 
-  function renderCitations(citations) {
-    if (!citations || !citations.length) return "";
-    const items = citations.slice(0, 8).map((c, i) => {
-      const board = c.board || "?";
-      const label = `${c.meeting_date || c.year || "?"} · ${c.name || "(unnamed)"}`;
-      const loc = [c.street, c.locality].filter(Boolean).join(", ");
-      const url = pdfUrlFor(c);
-      const pdfIcon = url
-        ? ` <a href="${url}" target="_blank" rel="noopener" title="Open source PDF" style="color:var(--accent);text-decoration:none;padding-left:4px;">↗</a>`
-        : "";
-      return `<div><a data-idx="${i}">
-        <span class="citation-board ${board}">${board}</span>
-        ${escapeHtml(label)}${loc ? ` <span style="color:var(--muted)"> — ${escapeHtml(loc)}</span>` : ""}
-      </a>${pdfIcon}</div>`;
-    }).join("");
-    return `<div class="chat-citations"><div class="label">Sources (${citations.length})</div>${items}</div>`;
+  function reconfigureSlider() {
+    const oldMinAttr = parseInt(minEl.min, 10);
+    const oldMaxAttr = parseInt(maxEl.max, 10);
+    const wasAtMin = parseInt(minEl.value, 10) === oldMinAttr;
+    const wasAtMax = parseInt(maxEl.value, 10) === oldMaxAttr;
+
+    minEl.min = maxEl.min = minYear;
+    minEl.max = maxEl.max = maxYear;
+    if (wasAtMin) minEl.value = minYear;
+    if (wasAtMax) maxEl.value = maxYear;
+
+    tickLabels.innerHTML = "";
+    for (let y = minYear; y <= maxYear; y++) {
+      const s = document.createElement("span");
+      s.textContent = y;
+      tickLabels.appendChild(s);
+    }
+    render();
   }
 
-  async function sendQuestion() {
-    const q = chatInput.value.trim();
-    if (!q) return;
-    appendMessage("user", q);
-    chatInput.value = "";
-    chatInput.style.height = "auto";
-    chatSend.disabled = true;
-
-    const thinking = appendMessage("assistant", `<span class="thinking-dots">Searching minutes</span>`, { raw: true });
-
+  async function loadAnnotations() {
     try {
-      const res = await fetch("/chat", {
-        method: "POST",
+      const res = await fetch("/annotations");
+      const body = await res.json();
+      (body.annotations || []).forEach(renderAnnotation);
+    } catch (e) { console.warn("annotations load:", e); }
+  }
+
+  async function deleteAnnotation(id) {
+    const res = await fetch(`/annotations?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    if (!res.ok) return;
+    const m = annotationMarkers.get(id);
+    if (m) { annotationLayer.removeLayer(m); annotationMarkers.delete(id); }
+    annotationsData.delete(id);
+    updateCountDisplay();
+  }
+
+  // Form wiring
+  const addBtn = document.getElementById("add-annotation");
+  const form = document.getElementById("annotation-form");
+  const annTitle = document.getElementById("ann-title");
+  const annAddress = document.getElementById("ann-address");
+  const annDescription = document.getElementById("ann-description");
+  const annDate = document.getElementById("ann-date");
+  const annErr = document.getElementById("ann-err");
+  const annSave = document.getElementById("ann-save");
+  const annCancel = document.getElementById("ann-cancel");
+
+  let editingId = null;  // null → create; string id → edit
+
+  function openForm({ title = "Add annotation", values = null, id = null } = {}) {
+    editingId = id;
+    annTitle.textContent = title;
+    annSave.textContent = id ? "Save changes" : "Save";
+    if (values) {
+      annAddress.value = values.address || "";
+      annDescription.value = values.description || "";
+      annDate.value = values.date || "";
+    } else {
+      annAddress.value = annDescription.value = annDate.value = "";
+    }
+    form.classList.add("open");
+    annErr.textContent = "";
+    annAddress.focus();
+  }
+  function closeForm() {
+    form.classList.remove("open");
+    annAddress.value = annDescription.value = annDate.value = "";
+    annErr.textContent = "";
+    editingId = null;
+    annTitle.textContent = "Add annotation";
+    annSave.textContent = "Save";
+  }
+  addBtn.addEventListener("click", () => form.classList.contains("open") ? closeForm() : openForm());
+  annCancel.addEventListener("click", closeForm);
+
+  function startEdit(id) {
+    const ann = annotationsData.get(id);
+    if (!ann) return;
+    map.closePopup();
+    openForm({
+      title: "Edit annotation",
+      id,
+      values: { address: ann.address, description: ann.description, date: ann.date },
+    });
+  }
+
+  async function submitAnnotation() {
+    const address = annAddress.value.trim();
+    if (!address) { annErr.textContent = "Address is required"; return; }
+    const date = annDate.value.trim();
+    if (!date) { annErr.textContent = "Date is required"; return; }
+    annSave.disabled = true;
+    annErr.textContent = editingId ? "Saving…" : "Geocoding…";
+    const payload = { address, description: annDescription.value.trim(), date };
+    try {
+      const url = editingId ? `/annotations?id=${encodeURIComponent(editingId)}` : "/annotations";
+      const method = editingId ? "PUT" : "POST";
+      const res = await fetch(url, {
+        method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: q }),
+        body: JSON.stringify(payload),
       });
       const body = await res.json();
-      thinking.remove();
       if (!res.ok || body.error) {
-        appendMessage("error", body.error || `error ${res.status}`);
+        annErr.textContent = body.error || `error ${res.status}`;
         return;
       }
-      const html = renderMarkdown(body.answer) + renderCitations(body.citations);
-      const msg = appendMessage("assistant", html, { raw: true });
-
-      // Citation click → fly the map to that citation
-      msg.querySelectorAll(".chat-citations a").forEach(a => {
-        a.addEventListener("click", () => {
-          const idx = parseInt(a.dataset.idx, 10);
-          const c = body.citations[idx];
-          if (c && c.lat && c.lon) {
-            map.flyTo([c.lat, c.lon], 17, { duration: 0.8 });
-          }
-        });
-      });
+      renderAnnotation(body.annotation);
+      map.flyTo([body.annotation.lat, body.annotation.lon], 17, { duration: 0.6 });
+      closeForm();
     } catch (e) {
-      thinking.remove();
-      appendMessage("error", `network error: ${e.message}`);
+      annErr.textContent = `network error: ${e.message}`;
     } finally {
-      chatSend.disabled = false;
-      chatInput.focus();
+      annSave.disabled = false;
     }
   }
+  annSave.addEventListener("click", submitAnnotation);
+  [annAddress, annDate].forEach(el =>
+    el.addEventListener("keydown", e => {
+      if (e.key === "Enter") { e.preventDefault(); submitAnnotation(); }
+    })
+  );
 
-  chatSend.addEventListener("click", sendQuestion);
-  chatInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      sendQuestion();
-    }
-  });
+  loadAnnotations();
+
+  // Chat is handled by chat.js — expose a map-flyTo callback for citation clicks
+  window.onChatCitation = (c) => {
+    if (c && c.lat && c.lon) map.flyTo([c.lat, c.lon], 17, { duration: 0.8 });
+  };
 })();
 </script>
 </body>

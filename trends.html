@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Woodbury Zoning Trends</title>
+<link rel="stylesheet" href="chat.css">
+<style>
+  :root {
+    --bg: #0f1216;
+    --panel: #1a1f26;
+    --text: #e6ebf2;
+    --muted: #8a95a5;
+    --accent: #ff6b35;
+    --blue: #4da6ff;
+    --border: #2b3340;
+  }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  body { padding: 0 0 80px; }
+  header { padding: 20px 40px; background: var(--panel); border-bottom: 1px solid var(--border); display: flex; align-items: baseline; gap: 20px; }
+  header h1 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+  header .sub { color: var(--muted); font-size: 13px; }
+  header nav { margin-left: auto; }
+  header nav a { color: var(--muted); text-decoration: none; font-size: 13px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px; }
+  header nav a:hover { color: var(--text); border-color: var(--accent); }
+
+  .tabs { max-width: 840px; margin: 18px auto 0; padding: 0 28px; display: flex; gap: 4px; border-bottom: 1px solid var(--border); }
+  .tab { padding: 10px 16px; cursor: pointer; font-size: 13px; font-weight: 500; color: var(--muted); background: transparent; border: none; border-bottom: 2px solid transparent; }
+  .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+  .tab:hover { color: var(--text); }
+
+  main { max-width: 840px; margin: 0 auto; padding: 24px 28px; }
+  h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); font-weight: 600; margin: 36px 0 14px; }
+  .view { display: none; }
+  .view.active { display: block; }
+
+  .prediction {
+    background: linear-gradient(135deg, rgba(255,107,53,0.08), rgba(77,166,255,0.06));
+    border: 1px solid rgba(255,107,53,0.35);
+    border-radius: 14px; padding: 24px 28px; margin-bottom: 32px;
+  }
+  .prediction .year-tag {
+    display: inline-block; color: var(--accent); font-size: 12px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;
+  }
+  .prediction h3 { margin: 0 0 14px; font-size: 22px; font-weight: 600; }
+  .prediction p { margin: 0 0 10px; font-size: 15px; line-height: 1.7; color: #e6ebf2; }
+  .prediction p:last-child { margin-bottom: 0; }
+
+  .framing {
+    background: rgba(77,166,255,0.04);
+    border-left: 3px solid var(--blue);
+    padding: 16px 20px; margin-bottom: 24px; border-radius: 4px;
+    font-size: 14px; line-height: 1.65; color: #d0dae6;
+  }
+  .framing .label { display: block; font-size: 11px; font-weight: 700; text-transform: uppercase;
+                    letter-spacing: 0.1em; color: var(--blue); margin-bottom: 8px; }
+
+  .years { display: flex; flex-direction: column; gap: 10px; }
+  .year-card {
+    display: grid; grid-template-columns: 72px 1fr; gap: 20px;
+    padding: 18px 0; border-bottom: 1px solid var(--border);
+  }
+  .year-card:last-child { border-bottom: none; }
+  .year-card .yr {
+    font-variant-numeric: tabular-nums; font-size: 22px; font-weight: 600;
+    color: var(--accent); letter-spacing: -0.01em; padding-top: 2px;
+  }
+  .year-card .stats {
+    font-size: 11px; color: var(--muted); margin-top: 4px; line-height: 1.5;
+    font-variant-numeric: tabular-nums;
+  }
+  .year-card .summary { font-size: 14.5px; line-height: 1.65; color: var(--text); }
+  .year-card .summary p { margin: 0; }
+
+  .kw-pills { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 5px; }
+  .kw-pill {
+    font-size: 10px; padding: 2px 7px; border-radius: 10px;
+    background: rgba(77,166,255,0.12); color: #a9cbec;
+    font-variant-numeric: tabular-nums;
+  }
+  .kw-pill.religious  { background: rgba(255,107,53,0.13); color: #ffb89a; }
+  .kw-pill.cross      { background: rgba(77,166,255,0.15); color: #a9cbec; }
+  .kw-pill.household  { background: rgba(255,62,154,0.12); color: #ffb0d4; }
+
+  footer {
+    max-width: 840px; margin: 40px auto 0; padding: 20px 28px;
+    color: var(--muted); font-size: 11px; border-top: 1px solid var(--border);
+    display: flex; gap: 20px; flex-wrap: wrap;
+  }
+  footer span b { color: var(--text); font-variant-numeric: tabular-nums; }
+
+  .loading, .error { color: var(--muted); text-align: center; padding: 80px 20px; font-size: 14px; }
+  .error { color: #ffa0a0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Village of Woodbury — Zoning Trends</h1>
+  <span class="sub">12-year analysis + 2026 outlook</span>
+  <nav><a href="index.html">← Back to map</a></nav>
+</header>
+
+<div class="tabs">
+  <button class="tab active" data-view="volume">Volume</button>
+  <button class="tab" data-view="demographics">Demographics</button>
+</div>
+
+<main id="content">
+  <div class="loading">Loading analysis…</div>
+</main>
+
+<button id="chat-toggle" title="Ask about these minutes">💬</button>
+<div id="chat-panel">
+  <div id="chat-header">
+    <h2>Ask the minutes</h2>
+    <button id="chat-close" title="Close">×</button>
+  </div>
+  <div id="chat-messages">
+    <div class="chat-msg system">Ask about applications, addresses, applicants, or patterns across years. Click a source to open its PDF.</div>
+  </div>
+  <div id="chat-input-wrap">
+    <textarea id="chat-input" placeholder="Ask a question…" rows="1"></textarea>
+    <button id="chat-send">Send</button>
+  </div>
+</div>
+<script defer src="chat.js"></script>
+
+<script>
+(async () => {
+  const content = document.getElementById("content");
+  let t;
+  try {
+    t = await fetch("trends.json").then(r => r.ok ? r.json() : Promise.reject(r.status));
+  } catch (e) {
+    content.innerHTML = `<div class="error">Couldn't load trends.json. Run <code>.venv/bin/python generate_trends.py</code> first.</div>`;
+    return;
+  }
+
+  const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+  function statLine(stats) {
+    if (!stats) return "";
+    const parts = [`${stats.total_applications} apps`];
+    const b = stats.by_board || {};
+    if (b.ZBA) parts.push(`ZBA ${b.ZBA}`);
+    if (b.PB) parts.push(`PB ${b.PB}`);
+    const dist = (stats.top_zoning_districts || []).slice(0, 3).map(d => d[0]).filter(Boolean);
+    if (dist.length) parts.push(`top: ${dist.join(", ")}`);
+    return parts.join(" · ");
+  }
+
+  function renderVolumeView() {
+    const frag = document.createElement("div");
+    frag.className = "view active";
+    frag.dataset.view = "volume";
+
+    const pred = document.createElement("div");
+    pred.className = "prediction";
+    pred.innerHTML = `
+      <div class="year-tag">Prediction · 2026</div>
+      <h3>What 2026 looks like, based on 12 years of trajectory</h3>
+      <p>${esc(t.prediction_2026).split(/\n+/).join("</p><p>")}</p>
+    `;
+    frag.appendChild(pred);
+
+    const h = document.createElement("h2");
+    h.textContent = "History";
+    frag.appendChild(h);
+
+    const grid = document.createElement("div");
+    grid.className = "years";
+    const years = Object.keys(t.years).map(y => parseInt(y, 10)).sort((a, b) => b - a);
+    for (const y of years) {
+      const stats = (t.source_stats || {})[String(y)];
+      const el = document.createElement("div");
+      el.className = "year-card";
+      el.innerHTML = `
+        <div>
+          <div class="yr">${y}</div>
+          <div class="stats">${esc(statLine(stats))}</div>
+        </div>
+        <div class="summary"><p>${esc(t.years[y])}</p></div>
+      `;
+      grid.appendChild(el);
+    }
+    frag.appendChild(grid);
+    return frag;
+  }
+
+  function renderDemoView() {
+    const d = t.demographics;
+    const frag = document.createElement("div");
+    frag.className = "view";
+    frag.dataset.view = "demographics";
+    if (!d) {
+      frag.innerHTML = `<div class="error">No demographics section in trends.json. Regenerate with <code>generate_trends.py</code>.</div>`;
+      return frag;
+    }
+
+    const framing = document.createElement("div");
+    framing.className = "framing";
+    framing.innerHTML = `<span class="label">Scope & caveats</span>${esc(d.framing).split(/\n+/).map(p => `<p>${p}</p>`).join("")}`;
+    frag.appendChild(framing);
+
+    const pred = document.createElement("div");
+    pred.className = "prediction";
+    pred.innerHTML = `
+      <div class="year-tag">2026 outlook — demographic signals</div>
+      <h3>Extrapolating the signal trajectory</h3>
+      <p>${esc(d.outlook_2026).split(/\n+/).join("</p><p>")}</p>
+    `;
+    frag.appendChild(pred);
+
+    const h = document.createElement("h2");
+    h.textContent = "By year";
+    frag.appendChild(h);
+
+    const hits = d.keyword_hits_per_year || {};
+    const categoryClass = {
+      religious_use: "religious", cross_community: "cross", household_adaptation: "household",
+    };
+
+    const grid = document.createElement("div");
+    grid.className = "years";
+    const years = Object.keys(d.years).map(y => parseInt(y, 10)).sort((a, b) => b - a);
+    for (const y of years) {
+      const yearHits = hits[String(y)] || {};
+      const pills = [];
+      for (const cat of ["religious_use", "cross_community", "household_adaptation"]) {
+        for (const [term, n] of Object.entries(yearHits[cat] || {})) {
+          pills.push(`<span class="kw-pill ${categoryClass[cat]}">${esc(term)} ×${n}</span>`);
+        }
+      }
+      const el = document.createElement("div");
+      el.className = "year-card";
+      el.innerHTML = `
+        <div>
+          <div class="yr">${y}</div>
+          <div class="kw-pills">${pills.join("") || '<span class="stats">no hits</span>'}</div>
+        </div>
+        <div class="summary"><p>${esc(d.years[y])}</p></div>
+      `;
+      grid.appendChild(el);
+    }
+    frag.appendChild(grid);
+    return frag;
+  }
+
+  const volumeEl = renderVolumeView();
+  const demoEl = renderDemoView();
+  content.innerHTML = "";
+  content.appendChild(volumeEl);
+  content.appendChild(demoEl);
+
+  document.querySelectorAll(".tab").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".tab").forEach(b => b.classList.toggle("active", b === btn));
+      document.querySelectorAll(".view").forEach(v => v.classList.toggle("active", v.dataset.view === btn.dataset.view));
+      window.scrollTo(0, 0);
+    });
+  });
+
+  const foot = document.createElement("footer");
+  const ts = t.generated_at ? new Date(t.generated_at).toLocaleString() : "—";
+  foot.innerHTML = `
+    <span>Generated: <b>${esc(ts)}</b></span>
+    <span>Model: <b>${esc(t.model || "—")}</b></span>
+    <span>Corpus: <b>${esc(t.total_applications)} applications</b></span>
+    <span>Tokens: <b>${esc(t.input_tokens)}</b> in · <b>${esc(t.output_tokens)}</b> out</span>
+  `;
+  document.body.appendChild(foot);
+})();
+</script>
+</body>
+</html>

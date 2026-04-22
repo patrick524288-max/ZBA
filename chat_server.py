@@ -19,13 +19,21 @@ from __future__ import annotations
 import json
 import os
 import re
+import secrets
 import sys
+import threading
+import time
+from datetime import datetime, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import urlparse
 
 import anthropic
+import requests
 
 ROOT = Path(__file__).parent
+ANNOTATIONS_PATH = ROOT / "annotations.json"
+_annotations_lock = threading.Lock()
 
 
 def _load_dotenv(path: Path) -> None:
@@ -195,6 +203,96 @@ def slim_citation(a: dict) -> dict:
     }
 
 
+# --- Annotations (user-added pins) ----------------------------------------
+
+WOODBURY_BBOX = "-74.200,41.280,-74.050,41.420"
+GEOCODER_UA = "WoodburyZoningViewer/0.2 (annotations)"
+
+
+_LEGACY_DATE_FORMATS = (
+    "%B %d, %Y", "%b %d, %Y", "%B %d %Y", "%b %d %Y",
+    "%m/%d/%Y", "%m-%d-%Y", "%Y-%m-%d", "%Y/%m/%d",
+)
+
+
+def _coerce_date(raw: str) -> tuple[str, int] | None:
+    """Return (iso_date, year) for a date string in ISO or common US formats."""
+    if not raw:
+        return None
+    raw = raw.strip()
+    # Fast path: already ISO
+    try:
+        d = datetime.fromisoformat(raw.split("T")[0])
+        return d.date().isoformat(), d.year
+    except ValueError:
+        pass
+    for fmt in _LEGACY_DATE_FORMATS:
+        try:
+            d = datetime.strptime(raw, fmt)
+            return d.date().isoformat(), d.year
+        except ValueError:
+            continue
+    return None
+
+
+def _load_annotations() -> list[dict]:
+    if not ANNOTATIONS_PATH.exists():
+        return []
+    try:
+        items = json.loads(ANNOTATIONS_PATH.read_text())
+    except json.JSONDecodeError:
+        return []
+    # One-shot migration: parse any free-form dates into ISO + year
+    dirty = False
+    for a in items:
+        if "year" in a and a.get("year") is not None:
+            continue
+        parsed = _coerce_date(a.get("date") or "")
+        if parsed:
+            a["date"], a["year"] = parsed
+            dirty = True
+    if dirty:
+        _save_annotations(items)
+    return items
+
+
+def _save_annotations(items: list[dict]) -> None:
+    tmp = ANNOTATIONS_PATH.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(items, indent=2))
+    tmp.replace(ANNOTATIONS_PATH)
+
+
+def _geocode(address: str) -> dict | None:
+    """Return {lat, lon, display_name} or None. Biased to Woodbury."""
+    params = {
+        "q": address,
+        "format": "json",
+        "limit": 3,
+        "viewbox": WOODBURY_BBOX,
+        "bounded": 0,
+        "countrycodes": "us",
+    }
+    r = requests.get(
+        "https://nominatim.openstreetmap.org/search",
+        params=params,
+        headers={"User-Agent": GEOCODER_UA},
+        timeout=15,
+    )
+    r.raise_for_status()
+    data = r.json()
+    if not data:
+        return None
+    # Prefer a hit that mentions Woodbury/Orange County; else first result
+    for hit in data:
+        dn = (hit.get("display_name") or "").lower()
+        if "orange county" in dn or "woodbury" in dn:
+            return {"lat": float(hit["lat"]), "lon": float(hit["lon"]),
+                    "display_name": hit.get("display_name")}
+    hit = data[0]
+    return {"lat": float(hit["lat"]), "lon": float(hit["lon"]),
+            "display_name": hit.get("display_name")}
+
+
 # --- HTTP handler ----------------------------------------------------------
 
 client: anthropic.Anthropic | None = None
@@ -206,8 +304,94 @@ class Handler(SimpleHTTPRequestHandler):
         if self.path == "/chat" or "error" in fmt.lower():
             sys.stderr.write(f"{self.address_string()} - {fmt % args}\n")
 
+    def do_GET(self):
+        path = urlparse(self.path).path
+        if path == "/annotations":
+            with _annotations_lock:
+                return self._json({"annotations": _load_annotations()})
+        # fall through to SimpleHTTPRequestHandler for static files
+        return super().do_GET()
+
+    def do_PUT(self):
+        path = urlparse(self.path).path
+        q = urlparse(self.path).query
+        if path != "/annotations":
+            return self.send_error(404)
+        params = dict(p.split("=", 1) for p in q.split("&") if "=" in p)
+        ann_id = params.get("id", "").strip()
+        if not ann_id:
+            return self._json({"error": "missing id"}, 400)
+
+        length = int(self.headers.get("Content-Length", "0") or 0)
+        raw = self.rfile.read(length) if length else b""
+        try:
+            body = json.loads(raw)
+        except json.JSONDecodeError:
+            return self._json({"error": "invalid JSON"}, 400)
+
+        address = (body.get("address") or "").strip()
+        description = (body.get("description") or "").strip()
+        date_raw = (body.get("date") or "").strip()
+        if not address:
+            return self._json({"error": "address required"}, 400)
+        if not date_raw:
+            return self._json({"error": "date required"}, 400)
+        parsed = _coerce_date(date_raw)
+        if not parsed:
+            return self._json({"error": "date must be YYYY-MM-DD"}, 400)
+        iso_date, year = parsed
+        if len(address) > 300 or len(description) > 1000:
+            return self._json({"error": "field too long"}, 400)
+
+        with _annotations_lock:
+            items = _load_annotations()
+            idx = next((i for i, a in enumerate(items) if a.get("id") == ann_id), -1)
+            if idx == -1:
+                return self._json({"error": "not found"}, 404)
+            current = dict(items[idx])
+            if address != current.get("address"):
+                try:
+                    geo = _geocode(address)
+                except requests.RequestException as e:
+                    return self._json({"error": f"geocoder error: {e}"}, 502)
+                if not geo:
+                    return self._json({"error": "address not found"}, 404)
+                current["lat"] = geo["lat"]
+                current["lon"] = geo["lon"]
+                current["display_name"] = geo["display_name"]
+            current["address"] = address
+            current["description"] = description
+            current["date"] = iso_date
+            current["year"] = year
+            current["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            items[idx] = current
+            _save_annotations(items)
+        return self._json({"annotation": current})
+
+    def do_DELETE(self):
+        path = urlparse(self.path).path
+        q = urlparse(self.path).query
+        if path != "/annotations":
+            return self.send_error(404)
+        # Parse id from query string
+        params = dict(p.split("=", 1) for p in q.split("&") if "=" in p)
+        ann_id = params.get("id", "").strip()
+        if not ann_id:
+            return self._json({"error": "missing id"}, 400)
+        with _annotations_lock:
+            items = _load_annotations()
+            before = len(items)
+            items = [a for a in items if a.get("id") != ann_id]
+            if len(items) == before:
+                return self._json({"error": "not found"}, 404)
+            _save_annotations(items)
+        return self._json({"ok": True, "id": ann_id})
+
     def do_POST(self):
-        if self.path != "/chat":
+        path = urlparse(self.path).path
+        if path == "/annotations":
+            return self._handle_annotation_create()
+        if path != "/chat":
             self.send_error(404, "Unknown endpoint")
             return
         length = int(self.headers.get("Content-Length", "0") or 0)
@@ -243,6 +427,50 @@ class Handler(SimpleHTTPRequestHandler):
         except Exception as e:
             sys.stderr.write(f"chat error: {type(e).__name__}: {e}\n")
             self._json({"error": f"{type(e).__name__}: {e}"}, 500)
+
+    def _handle_annotation_create(self):
+        length = int(self.headers.get("Content-Length", "0") or 0)
+        raw = self.rfile.read(length) if length else b""
+        try:
+            body = json.loads(raw)
+        except json.JSONDecodeError:
+            return self._json({"error": "invalid JSON"}, 400)
+        address = (body.get("address") or "").strip()
+        description = (body.get("description") or "").strip()
+        date_raw = (body.get("date") or "").strip()
+        if not address:
+            return self._json({"error": "address required"}, 400)
+        if not date_raw:
+            return self._json({"error": "date required"}, 400)
+        parsed = _coerce_date(date_raw)
+        if not parsed:
+            return self._json({"error": "date must be YYYY-MM-DD"}, 400)
+        iso_date, year = parsed
+        if len(address) > 300 or len(description) > 1000:
+            return self._json({"error": "field too long"}, 400)
+        try:
+            geo = _geocode(address)
+        except requests.RequestException as e:
+            return self._json({"error": f"geocoder error: {e}"}, 502)
+        if not geo:
+            return self._json({"error": "address not found"}, 404)
+
+        ann = {
+            "id": secrets.token_urlsafe(8),
+            "address": address,
+            "description": description,
+            "date": iso_date,
+            "year": year,
+            "lat": geo["lat"],
+            "lon": geo["lon"],
+            "display_name": geo["display_name"],
+            "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        }
+        with _annotations_lock:
+            items = _load_annotations()
+            items.append(ann)
+            _save_annotations(items)
+        self._json({"annotation": ann})
 
     def _json(self, obj: dict, code: int = 200):
         data = json.dumps(obj).encode()

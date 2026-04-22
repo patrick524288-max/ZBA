@@ -19,6 +19,9 @@ geocode_cache.json
 applications.json
 zoning_map_src/
 
+# User-entered annotations (local data, don't share publicly)
+annotations.json
+
 # OS / editor
 .DS_Store
 .claude/
