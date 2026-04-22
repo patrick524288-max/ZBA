@@ -38,6 +38,8 @@ export ANTHROPIC_API_KEY=sk-ant-...   # for the chat feature
 | `index.html` | Static Leaflet viewer with year-range slider, per-board toggles, and chat panel. Loads `applications_geocoded.json`. No build step. |
 | `chat_server.py` | Serves the static viewer and a `/chat` endpoint. Retrieves relevant applications by keyword/entity/address match, calls Claude Opus 4.7 with the retrieved context, returns the answer + citations. Requires `ANTHROPIC_API_KEY`. |
 | `applications_geocoded.json` | Shipped data snapshot so the viewer works without re-running the pipeline. |
+| `zoning_map.png` | Rendered Village of Woodbury 2011 zoning map. |
+| `zoning_map_bounds.json` | Leaflet bounds for the zoning overlay, auto-georeferenced from PDF street labels cross-referenced to geocoded addresses (~208 m median residual). |
 
 ## Known limitations
 

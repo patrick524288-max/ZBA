@@ -17,6 +17,7 @@ memory/
 # Regeneratable artifacts
 geocode_cache.json
 applications.json
+zoning_map_src/
 
 # OS / editor
 .DS_Store

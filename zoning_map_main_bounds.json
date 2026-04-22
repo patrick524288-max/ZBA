@@ -1,0 +1,26 @@
+{
+  "image": "zoning_map_main.png",
+  "width_px": 3888,
+  "height_px": 3888,
+  "corners": {
+    "top_left": [
+      41.40272673643021,
+      -74.18905153583816
+    ],
+    "top_right": [
+      41.429314240697714,
+      -73.98156354180065
+    ],
+    "bottom_left": [
+      41.24631402550197,
+      -74.15381170982448
+    ],
+    "bottom_right": [
+      41.27290152976946,
+      -73.94632371578697
+    ]
+  },
+  "rotation_deg": 9.308524533538115,
+  "source": "PDF /VP/Measure/GPTS (Main Zoning Layer), ESRI y-down LPTS",
+  "note": "Use L.imageOverlay.rotated(topLeft, topRight, bottomLeft)."
+}

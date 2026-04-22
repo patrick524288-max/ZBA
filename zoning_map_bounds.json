@@ -1,0 +1,37 @@
+{
+  "image": "zoning_map.png",
+  "width_px": 1344,
+  "height_px": 2301,
+  "bounds": [
+    [
+      41.31780612289094,
+      -74.13211187157809
+    ],
+    [
+      41.37366387710909,
+      -74.08833812842192
+    ]
+  ],
+  "source": "PDF embedded /VP/Measure/GPTS (ArcMap export)",
+  "viewport_name": "Inset\u0000",
+  "rotation_deg": -0.922656523650359,
+  "corners": {
+    "top_left": [
+      41.31811257419094,
+      -74.13211187157809
+    ],
+    "top_right": [
+      41.31780612289094,
+      -74.08903192180769
+    ],
+    "bottom_left": [
+      41.37366387710909,
+      -74.13141807819233
+    ],
+    "bottom_right": [
+      41.37335742580909,
+      -74.08833812842192
+    ]
+  },
+  "note": "Georeferenced from ArcGIS PDF metadata. Covers the hamlet-detail inset."
+}

@@ -8,6 +8,7 @@
   integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
   integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script src="https://unpkg.com/leaflet-imageoverlay-rotated@0.2.1/Leaflet.ImageOverlay.Rotated.js"></script>
 <style>
   :root {
     --bg: #0f1216;
@@ -140,6 +141,8 @@
     <span class="legend">
       <label><input type="checkbox" id="toggle-zba" checked><span class="swatch zba"></span>ZBA</label>
       <label><input type="checkbox" id="toggle-pb" checked><span class="swatch pb"></span>Planning Board</label>
+      <label title="Overlay the 2011 Village of Woodbury zoning map"><input type="checkbox" id="toggle-zoning"> Zoning</label>
+      <input type="range" id="zoning-opacity" min="0.1" max="1" step="0.05" value="0.55" title="Zoning overlay opacity" style="width:70px;accent-color:var(--accent);margin-left:-6px;">
     </span>
     <span class="count" id="count">— of —</span>
   </header>
@@ -187,6 +190,48 @@
     subdomains: "abcd",
     maxZoom: 20,
   }).addTo(map);
+
+  // Zoning overlays — two layers:
+  //   - Main Zoning Layer (covers the whole Village, rotated ~9°, uses rotated-image plugin)
+  //   - Inset (higher-detail hamlet zoom, axis-aligned, loaded on top of main)
+  const zoningLayers = { main: null, inset: null };
+  const zoningToggle = document.getElementById("toggle-zoning");
+  const zoningOpacity = document.getElementById("zoning-opacity");
+
+  async function loadZoningLayers() {
+    try {
+      const mainMeta = await fetch("zoning_map_main_bounds.json").then(r => r.json());
+      const c = mainMeta.corners;
+      zoningLayers.main = L.imageOverlay.rotated(
+        mainMeta.image,
+        L.latLng(c.top_left), L.latLng(c.top_right), L.latLng(c.bottom_left),
+        { opacity: parseFloat(zoningOpacity.value), interactive: false }
+      );
+    } catch (e) { console.warn("main zoning layer:", e); }
+
+    try {
+      const insetMeta = await fetch("zoning_map_bounds.json").then(r => r.json());
+      zoningLayers.inset = L.imageOverlay(insetMeta.image, insetMeta.bounds, {
+        opacity: parseFloat(zoningOpacity.value), interactive: false
+      });
+    } catch (e) { console.warn("inset zoning layer:", e); }
+
+    zoningToggle.disabled = !(zoningLayers.main || zoningLayers.inset);
+  }
+
+  zoningToggle.disabled = true;
+  loadZoningLayers();
+
+  zoningToggle.addEventListener("change", () => {
+    const on = zoningToggle.checked;
+    if (zoningLayers.main) on ? zoningLayers.main.addTo(map) : zoningLayers.main.remove();
+    if (zoningLayers.inset) on ? zoningLayers.inset.addTo(map) : zoningLayers.inset.remove();
+  });
+  zoningOpacity.addEventListener("input", () => {
+    const o = parseFloat(zoningOpacity.value);
+    if (zoningLayers.main)  zoningLayers.main.setOpacity(o);
+    if (zoningLayers.inset) zoningLayers.inset.setOpacity(o);
+  });
 
   const layer = L.layerGroup().addTo(map);
 
