@@ -92,7 +92,8 @@
     send.disabled = true;
     const thinking = append("assistant", '<span class="thinking-dots">Searching minutes</span>', { raw: true });
     try {
-      const res = await fetch("/chat", {
+      // Relative so /m/<slug>/ resolves to /m/<slug>/chat, which the server dispatches per-municipality
+      const res = await fetch("chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: q }),

@@ -6,6 +6,7 @@ reruns are safe even if a previous run was interrupted.
 """
 from __future__ import annotations
 
+import argparse
 import subprocess
 import sys
 import time
@@ -13,8 +14,7 @@ from pathlib import Path
 
 import pdfplumber
 
-PDF_ROOT = Path(__file__).parent / "pdfs"
-BOARDS = ["Zoning_Board", "Planning_Board"]
+import municipality
 
 
 def is_scanned(path: Path) -> bool:
@@ -36,9 +36,16 @@ def ocr(path: Path) -> tuple[bool, str]:
 
 
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--slug", "-m", default=municipality.DEFAULT_SLUG)
+    args = ap.parse_args()
+    cfg = municipality.load_config(args.slug)
+    pdf_root = municipality.pdfs_dir(args.slug)
+    boards = list(cfg["boards"].values())  # folder names
+
     scanned = []
-    for board in BOARDS:
-        root = PDF_ROOT / board
+    for board in boards:
+        root = pdf_root / board
         if not root.exists():
             continue
         board_scanned = [p for p in sorted(root.rglob("*.pdf")) if is_scanned(p)]

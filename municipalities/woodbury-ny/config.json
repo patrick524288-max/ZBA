@@ -1,0 +1,37 @@
+{
+  "slug": "woodbury-ny",
+  "display_name": "Village of Woodbury, NY",
+  "state": "NY",
+  "county": "Orange",
+  "bbox": [-74.200, 41.280, -74.050, 41.420],
+  "map_center": [41.338, -74.110],
+  "map_zoom": 13,
+  "boards": {
+    "ZBA": "Zoning_Board",
+    "PB": "Planning_Board"
+  },
+  "board_labels": {
+    "ZBA": "Zoning Board of Appeals",
+    "PB": "Planning Board"
+  },
+  "board_colors": {
+    "ZBA": "#ff6b35",
+    "PB": "#4da6ff"
+  },
+  "localities": ["Highland Mills", "Central Valley", "Woodbury"],
+  "repeat_players": [
+    "hartman", "morgante", "barshov", "gelb", "naughton", "moran", "panella",
+    "gerver", "brady", "aeonn", "crystal springs", "woodbury villas",
+    "kenny building", "valley seafood", "woodbury common", "smith clove",
+    "devenuto", "all mine", "clovewood", "rushmore"
+  ],
+  "demographic_context": "The Village of Woodbury is directly adjacent to the Village of Palm Tree (formerly Kiryas Joel), a large Satmar Hasidic community, and regional news and court records document meaningful development-pressure spillover.",
+  "doc_center": {
+    "adapter": "joomla-docman",
+    "base_url": "https://villageofwoodbury.com",
+    "board_roots": {
+      "ZBA": "/document-center/agendas-minutes-meeting-documents/zoning-board-of-appeals-minutes.html",
+      "PB":  "/document-center/agendas-minutes-meeting-documents/planning-board-minutes.html"
+    }
+  }
+}

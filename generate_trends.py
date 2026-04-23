@@ -8,6 +8,7 @@ Requires ANTHROPIC_API_KEY (loaded from .env the same way chat_server.py does).
 """
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import random
@@ -17,9 +18,9 @@ from pathlib import Path
 
 import anthropic
 
+import municipality
+
 ROOT = Path(__file__).parent
-APPS_PATH = ROOT / "applications_geocoded.json"
-OUT = ROOT / "trends.json"
 
 
 def _load_dotenv(path: Path) -> None:
@@ -38,15 +39,7 @@ def _load_dotenv(path: Path) -> None:
 _load_dotenv(ROOT / ".env")
 
 
-# Entities worth surfacing when they show up frequently in a year (repeat players).
-REPEAT_PLAYERS = [
-    "hartman", "morgante", "barshov", "gelb", "clovewood", "rushmore",
-    "crystal springs", "woodbury villas", "aeonn", "kenny building",
-    "valley seafood", "woodbury common", "smith clove", "devenuto",
-]
-
-
-def year_bundle(apps_in_year: list[dict]) -> dict:
+def year_bundle(apps_in_year: list[dict], repeat_players: list[str]) -> dict:
     total = len(apps_in_year)
     by_board = Counter(a.get("board") for a in apps_in_year)
     by_district = Counter(a.get("zoning_district") for a in apps_in_year if a.get("zoning_district"))
@@ -55,7 +48,7 @@ def year_bundle(apps_in_year: list[dict]) -> dict:
 
     # Repeat-player mentions across raw_block text
     blob = " ".join((a.get("raw_block") or "").lower() for a in apps_in_year)
-    player_hits = {p: blob.count(p) for p in REPEAT_PLAYERS if blob.count(p) >= 2}
+    player_hits = {p: blob.count(p) for p in repeat_players if blob.count(p) >= 2}
 
     # Representative names (dedup by address+name for variety)
     seen = set()
@@ -260,14 +253,23 @@ def build_demo_prompt(demo_bundles: dict[int, dict]) -> str:
 
 
 def main():
-    apps = json.loads(APPS_PATH.read_text())
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--slug", "-m", default=municipality.DEFAULT_SLUG)
+    args = ap.parse_args()
+    cfg = municipality.load_config(args.slug)
+    derived = municipality.derived_dir(args.slug)
+    apps_path = derived / "applications_geocoded.json"
+    out_path = derived / "trends.json"
+    repeat_players = cfg.get("repeat_players", [])
+
+    apps = json.loads(apps_path.read_text())
     by_year = defaultdict(list)
     for a in apps:
         y = a.get("year")
         if y:
             by_year[y].append(a)
 
-    year_bundles = {y: year_bundle(apps) for y, apps in by_year.items()}
+    year_bundles = {y: year_bundle(apps, repeat_players) for y, apps in by_year.items()}
     demo_bundles = {y: demographic_bundle(apps) for y, apps in by_year.items()}
     volume_prompt = build_prompt(year_bundles)
     demo_prompt = build_demo_prompt(demo_bundles)
@@ -315,8 +317,8 @@ def main():
         "input_tokens": vu.input_tokens + du.input_tokens,
         "output_tokens": vu.output_tokens + du.output_tokens,
     }
-    OUT.write_text(json.dumps(out, indent=2))
-    print(f"Wrote {OUT} — total {out['input_tokens']} in, {out['output_tokens']} out")
+    out_path.write_text(json.dumps(out, indent=2))
+    print(f"Wrote {out_path} — total {out['input_tokens']} in, {out['output_tokens']} out")
 
 
 if __name__ == "__main__":

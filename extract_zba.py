@@ -6,6 +6,7 @@ so we can triage in the viewer.
 """
 from __future__ import annotations
 
+import argparse
 import json
 import re
 from dataclasses import asdict, dataclass, field
@@ -14,12 +15,7 @@ from pathlib import Path
 
 import pdfplumber
 
-PDF_ROOT = Path(__file__).parent / "pdfs"
-BOARDS = {
-    "Zoning_Board": "ZBA",
-    "Planning_Board": "PB",
-}
-OUTPUT = Path(__file__).parent / "applications.json"
+import municipality
 
 MEETING_DATE_RE = re.compile(
     r"held on\s+([A-Z][a-z]+\s+\d{1,2},?\s+\d{4})",
@@ -198,7 +194,7 @@ def folder_year(path: Path) -> int | None:
     return None
 
 
-def process_pdf(path: Path, board: str) -> list[Application]:
+def process_pdf(path: Path, board: str, pdf_root: Path) -> list[Application]:
     try:
         with pdfplumber.open(path) as pdf:
             pages = [p.extract_text() or "" for p in pdf.pages]
@@ -220,7 +216,7 @@ def process_pdf(path: Path, board: str) -> list[Application]:
         if "street" not in fields and "tax_map" not in fields:
             warnings.append("no_location")
         app = Application(
-            source_pdf=str(path.relative_to(PDF_ROOT.parent)),
+            source_pdf=str(path.relative_to(pdf_root.parent)),
             board=board,
             meeting_date=meeting_date,
             year=year,
@@ -235,10 +231,21 @@ def process_pdf(path: Path, board: str) -> list[Application]:
 
 
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--slug", "-m", default=municipality.DEFAULT_SLUG)
+    args = ap.parse_args()
+    slug = args.slug
+    cfg = municipality.load_config(slug)
+    pdf_root = municipality.pdfs_dir(slug)
+    out = municipality.derived_dir(slug) / "applications.json"
+
+    # Folder-name → board-code map, driven by config.json
+    boards = {folder: code for code, folder in cfg["boards"].items()}
+
     all_apps: list[Application] = []
     total_with_loc = 0
-    for folder, board in BOARDS.items():
-        root = PDF_ROOT / folder
+    for folder, board in boards.items():
+        root = pdf_root / folder
         if not root.exists():
             print(f"Skipping {folder} (not found)")
             continue
@@ -247,7 +254,7 @@ def main():
         n_apps = 0
         n_loc = 0
         for path in pdfs:
-            apps = process_pdf(path, board)
+            apps = process_pdf(path, board, pdf_root)
             for a in apps:
                 if a.street or a.tax_map:
                     n_loc += 1
@@ -257,8 +264,8 @@ def main():
         print(f"  {board}: {n_apps} applications, {n_loc} with location "
               f"({100*n_loc/max(n_apps,1):.0f}%)")
 
-    OUTPUT.write_text(json.dumps([asdict(a) for a in all_apps], indent=2))
-    print(f"\nWrote {len(all_apps)} total applications to {OUTPUT}")
+    out.write_text(json.dumps([asdict(a) for a in all_apps], indent=2))
+    print(f"\nWrote {len(all_apps)} total applications to {out}")
     print(f"  {total_with_loc}/{len(all_apps)} have a location "
           f"({100*total_with_loc/max(len(all_apps),1):.0f}%)")
 

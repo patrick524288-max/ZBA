@@ -31,9 +31,13 @@ from urllib.parse import urlparse
 import anthropic
 import requests
 
+import municipality
+
 ROOT = Path(__file__).parent
-ANNOTATIONS_PATH = ROOT / "annotations.json"
+ANNOTATIONS_PATH = municipality.shared_path("annotations.json")
 _annotations_lock = threading.Lock()
+
+_MUNI_RE = re.compile(r"^/m/([a-z0-9][a-z0-9-]{0,63})(/.*)?$")
 
 
 def _load_dotenv(path: Path) -> None:
@@ -54,8 +58,17 @@ def _load_dotenv(path: Path) -> None:
 
 _load_dotenv(ROOT / ".env")
 
-APPS = json.loads((ROOT / "applications_geocoded.json").read_text())
 PORT = int(os.environ.get("PORT", "8765"))
+
+# Per-municipality apps, loaded lazily on first chat call.
+_apps_cache: dict[str, list[dict]] = {}
+
+
+def get_apps(slug: str) -> list[dict]:
+    if slug not in _apps_cache:
+        path = municipality.derived_dir(slug) / "applications_geocoded.json"
+        _apps_cache[slug] = json.loads(path.read_text()) if path.exists() else []
+    return _apps_cache[slug]
 
 # --- Retrieval -------------------------------------------------------------
 
@@ -86,7 +99,7 @@ STOP = {
 }
 
 
-def retrieve(question: str, n: int = 20) -> list[dict]:
+def retrieve(question: str, apps: list[dict], n: int = 20) -> list[dict]:
     q = question.lower()
     streets = [m.group(0).strip().lower() for m in STREET_RE.finditer(q)]
     years = set(re.findall(r"\b(20[0-3]\d)\b", q))
@@ -95,7 +108,7 @@ def retrieve(question: str, n: int = 20) -> list[dict]:
     tokens = {t for t in re.findall(r"\w{4,}", q) if t not in STOP and not t.isdigit()}
 
     scored = []
-    for a in APPS:
+    for a in apps:
         score = 0
         bl = (a.get("raw_block") or "").lower()
         name = (a.get("name") or "").lower()
@@ -309,8 +322,45 @@ class Handler(SimpleHTTPRequestHandler):
         if path == "/annotations":
             with _annotations_lock:
                 return self._json({"annotations": _load_annotations()})
-        # fall through to SimpleHTTPRequestHandler for static files
+
+        # Root redirect → the one municipality we have
+        if path == "/":
+            slugs = municipality.list_slugs()
+            target = f"/m/{slugs[0]}/" if slugs else "/index.html"
+            self.send_response(302)
+            self.send_header("Location", target)
+            self.end_headers()
+            return
+
+        # /m/<slug>/... — rewrite to actual file path and delegate
+        m = _MUNI_RE.match(path)
+        if m:
+            rewritten = self._rewrite_muni_path(m.group(1), m.group(2) or "/")
+            if rewritten is None:
+                return self.send_error(404)
+            self.path = rewritten + (("?" + urlparse(self.path).query) if urlparse(self.path).query else "")
+            return super().do_GET()
+
         return super().do_GET()
+
+    def _rewrite_muni_path(self, slug: str, rest: str) -> str | None:
+        """Map /m/<slug>/<rest> to an actual file path under the project root.
+        Returns None if the file doesn't exist."""
+        rest = rest.lstrip("/")
+        if rest in ("", "index.html"):
+            return "/index.html"
+        if rest == "trends.html":
+            return "/trends.html"
+        # Derived (JSON) first, then assets (PNG/etc.)
+        for subdir in ("derived", "assets"):
+            p = municipality.municipality_dir(slug) / subdir / rest
+            try:
+                p.resolve().relative_to((municipality.municipality_dir(slug) / subdir).resolve())
+            except ValueError:
+                return None  # path traversal attempt
+            if p.is_file():
+                return "/" + str(p.relative_to(ROOT))
+        return None
 
     def do_PUT(self):
         path = urlparse(self.path).path
@@ -391,9 +441,19 @@ class Handler(SimpleHTTPRequestHandler):
         path = urlparse(self.path).path
         if path == "/annotations":
             return self._handle_annotation_create()
-        if path != "/chat":
+        # Per-municipality chat: /m/<slug>/chat
+        m = _MUNI_RE.match(path)
+        slug = None
+        if m and (m.group(2) or "") == "/chat":
+            slug = m.group(1)
+        elif path == "/chat":
+            # Backwards compat: default to the one municipality we have
+            slugs = municipality.list_slugs()
+            slug = slugs[0] if slugs else None
+        if not slug:
             self.send_error(404, "Unknown endpoint")
             return
+
         length = int(self.headers.get("Content-Length", "0") or 0)
         raw = self.rfile.read(length) if length else b""
         try:
@@ -411,7 +471,8 @@ class Handler(SimpleHTTPRequestHandler):
             return self._json({"error": "ANTHROPIC_API_KEY not set on server"}, 500)
 
         try:
-            matches = retrieve(question)
+            apps = get_apps(slug)
+            matches = retrieve(question, apps)
             answer = ask_claude(client, question, matches)
             self._json({
                 "answer": answer,
@@ -490,7 +551,8 @@ def main():
         sys.stderr.write(f"WARNING: Claude client init failed ({e}). /chat will return errors.\n")
         client = None
 
-    print(f"Serving http://localhost:{PORT}  ({len(APPS)} applications loaded)")
+    slugs = municipality.list_slugs()
+    print(f"Serving http://localhost:{PORT}  ({len(slugs)} municipalities: {', '.join(slugs) or '—'})")
     print(f"Chat: {'ENABLED' if client else 'DISABLED (set ANTHROPIC_API_KEY)'}")
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
 

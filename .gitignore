@@ -1,5 +1,6 @@
 # Source PDFs (public records, too large for git; fetch locally)
 pdfs/
+municipalities/*/pdfs/
 
 # Python
 .venv/
@@ -14,13 +15,18 @@ memory/
 .env
 .env.*
 
-# Regeneratable artifacts
+# Regeneratable artifacts — per-municipality and shared
 geocode_cache.json
 applications.json
 zoning_map_src/
+municipalities/*/derived/applications.json
+municipalities/*/derived/geocode_cache.json
+municipalities/*/assets_src/
+shared/geocode_cache.json
 
 # User-entered annotations (local data, don't share publicly)
 annotations.json
+shared/annotations.json
 
 # OS / editor
 .DS_Store
