@@ -323,14 +323,17 @@ class Handler(SimpleHTTPRequestHandler):
             with _annotations_lock:
                 return self._json({"annotations": _load_annotations()})
 
-        # Root redirect → the one municipality we have
-        if path == "/":
+        # Legacy top-level HTML → redirect into /m/<slug>/ so relative data URLs resolve
+        if path in ("/", "/index.html", "/trends.html"):
             slugs = municipality.list_slugs()
-            target = f"/m/{slugs[0]}/" if slugs else "/index.html"
-            self.send_response(302)
-            self.send_header("Location", target)
-            self.end_headers()
-            return
+            if slugs:
+                slug = slugs[0]
+                page = path.lstrip("/") or ""
+                target = f"/m/{slug}/{page}"
+                self.send_response(302)
+                self.send_header("Location", target)
+                self.end_headers()
+                return
 
         # /m/<slug>/... — rewrite to actual file path and delegate
         m = _MUNI_RE.match(path)

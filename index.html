@@ -99,6 +99,44 @@
   }
   #annotation-form button.cancel { background: transparent; color: var(--muted); border: 1px solid var(--border); }
   #annotation-form .err { color: #ffa0a0; font-size: 12px; margin-top: 6px; min-height: 1em; }
+
+  /* Cluster timeline */
+  #cluster-timeline {
+    padding: 10px 24px 14px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(255,62,154,0.04), transparent);
+  }
+  #cluster-timeline.hidden { display: none; }
+  .ct-header {
+    display: flex; align-items: center; gap: 12px;
+    font-size: 12px; color: var(--muted); margin-bottom: 10px;
+  }
+  .ct-header .title { color: #ff3e9a; font-weight: 600; letter-spacing: 0.02em; }
+  .ct-header .spacer { flex: 1; }
+  .ct-header button {
+    background: transparent; border: 1px solid var(--border); color: var(--muted);
+    border-radius: 4px; padding: 2px 8px; font: inherit; font-size: 11px; cursor: pointer;
+  }
+  .ct-header button:hover { color: var(--text); border-color: var(--muted); }
+  .ct-track { position: relative; height: 24px; margin: 0 6px; }
+  .ct-line {
+    position: absolute; left: 0; right: 0; top: 50%;
+    height: 2px; background: var(--border); border-radius: 2px;
+    transform: translateY(-50%);
+  }
+  .ct-dot {
+    position: absolute; width: 12px; height: 12px; border-radius: 50%;
+    background: #ff3e9a; top: 50%; transform: translate(-50%, -50%);
+    cursor: pointer; border: 2px solid #0f1216;
+    box-shadow: 0 0 0 1px rgba(255,62,154,0.4);
+    transition: transform 0.12s;
+  }
+  .ct-dot:hover { transform: translate(-50%, -50%) scale(1.35); }
+  .ct-labels {
+    display: flex; justify-content: space-between;
+    margin-top: 6px; color: var(--muted); font-size: 10px;
+    font-variant-numeric: tabular-nums;
+  }
 </style>
 </head>
 <body>
@@ -109,6 +147,11 @@
       <label><input type="checkbox" id="toggle-zba" checked><span class="swatch zba"></span>ZBA</label>
       <label><input type="checkbox" id="toggle-pb" checked><span class="swatch pb"></span>Planning Board</label>
       <label title="Your saved annotations"><input type="checkbox" id="toggle-ann" checked><span class="swatch pink"></span>Pins</label>
+      <label title="Detect spatial clusters among your pins"><input type="checkbox" id="toggle-clusters"><span class="swatch" style="background:transparent;border:2px dashed #ff3e9a;"></span>Clusters</label>
+      <span id="cluster-params" style="display:none;font-size:11px;color:var(--muted);margin-left:-8px">
+        radius <input type="number" id="cluster-eps" min="100" max="10000" step="100" value="800" style="width:60px;background:#0f1216;border:1px solid var(--border);border-radius:4px;color:var(--text);padding:2px 4px;font:inherit;font-size:11px"> m
+        · min <input type="number" id="cluster-minpts" min="2" max="20" value="2" style="width:40px;background:#0f1216;border:1px solid var(--border);border-radius:4px;color:var(--text);padding:2px 4px;font:inherit;font-size:11px">
+      </span>
       <label title="Overlay the 2011 Village of Woodbury zoning map"><input type="checkbox" id="toggle-zoning"> Zoning</label>
       <input type="range" id="zoning-opacity" min="0.1" max="1" step="0.05" value="0.55" title="Zoning overlay opacity" style="width:70px;accent-color:var(--accent);margin-left:-6px;">
     </span>
@@ -117,6 +160,22 @@
   </header>
   <div id="map"></div>
   <div id="controls">
+    <div id="cluster-timeline" class="hidden">
+      <div class="ct-header">
+        <span class="title">Cluster timeline</span>
+        <span id="ct-summary"></span>
+        <span class="spacer"></span>
+        <button id="ct-close" type="button">close</button>
+      </div>
+      <div class="ct-track">
+        <div class="ct-line"></div>
+        <!-- dots injected -->
+      </div>
+      <div class="ct-labels">
+        <span id="ct-min"></span>
+        <span id="ct-max"></span>
+      </div>
+    </div>
     <div class="slider-wrap" id="slider">
       <div class="track"></div>
       <div class="track-active" id="track-active"></div>
@@ -234,6 +293,196 @@
   const annotationLayer = L.layerGroup();
   const annotationMarkers = new Map();   // id -> marker
   const annotationsData = new Map();     // id -> full annotation object (used for filter)
+  const clusterLayer = L.layerGroup().addTo(map);  // always on; markers added/cleared per render
+
+  // --- DBSCAN for annotation spatial clustering ----------------------------
+  function haversineMeters(aLat, aLon, bLat, bLon) {
+    const R = 6371000;
+    const rLat1 = aLat * Math.PI / 180;
+    const rLat2 = bLat * Math.PI / 180;
+    const dLat = (bLat - aLat) * Math.PI / 180;
+    const dLon = (bLon - aLon) * Math.PI / 180;
+    const h = Math.sin(dLat / 2) ** 2 + Math.cos(rLat1) * Math.cos(rLat2) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(h));
+  }
+
+  function dbscan(anns, epsilonM, minPts) {
+    // anns: [{id, lat, lon, date, address, ...}, ...]
+    const n = anns.length;
+    const labels = new Array(n).fill(null);  // null=unvisited, -1=noise, 0+=cluster id
+    let cid = 0;
+
+    function regionQuery(i) {
+      const out = [];
+      for (let j = 0; j < n; j++) {
+        if (i === j) continue;
+        if (haversineMeters(anns[i].lat, anns[i].lon, anns[j].lat, anns[j].lon) <= epsilonM) {
+          out.push(j);
+        }
+      }
+      return out;
+    }
+
+    for (let i = 0; i < n; i++) {
+      if (labels[i] !== null) continue;
+      const nbs = regionQuery(i);
+      if (nbs.length + 1 < minPts) { labels[i] = -1; continue; }
+      labels[i] = cid;
+      const queue = [...nbs];
+      while (queue.length) {
+        const j = queue.shift();
+        if (labels[j] === -1) labels[j] = cid;
+        if (labels[j] !== null) continue;
+        labels[j] = cid;
+        const jn = regionQuery(j);
+        if (jn.length + 1 >= minPts) for (const k of jn) queue.push(k);
+      }
+      cid++;
+    }
+
+    const groups = new Map();
+    for (let i = 0; i < n; i++) {
+      if (labels[i] >= 0) {
+        if (!groups.has(labels[i])) groups.set(labels[i], []);
+        groups.get(labels[i]).push(anns[i]);
+      }
+    }
+    return [...groups.values()];
+  }
+
+  function renderClusters(visibleAnns, epsilonM, minPts) {
+    clusterLayer.clearLayers();
+    if (visibleAnns.length < minPts) return 0;
+    const clusters = dbscan(visibleAnns, epsilonM, minPts);
+    for (const group of clusters) {
+      const avgLat = group.reduce((s, a) => s + a.lat, 0) / group.length;
+      const avgLon = group.reduce((s, a) => s + a.lon, 0) / group.length;
+      // Radius: max pairwise distance from centroid, padded, floor at epsilon/2
+      let maxR = 0;
+      for (const a of group) maxR = Math.max(maxR, haversineMeters(avgLat, avgLon, a.lat, a.lon));
+      const radius = Math.max(maxR + 60, epsilonM * 0.4);
+      const dates = group.map(a => a.date).filter(Boolean).sort();
+      const span = dates.length
+        ? (dates[0] === dates[dates.length - 1] ? formatAnnDate(dates[0])
+           : `${formatAnnDate(dates[0])} – ${formatAnnDate(dates[dates.length - 1])}`)
+        : "(no dates)";
+      const circle = L.circle([avgLat, avgLon], {
+        radius,
+        color: "#ff3e9a",
+        weight: 2,
+        opacity: 0.9,
+        fillColor: "#ff3e9a",
+        fillOpacity: 0.08,
+        dashArray: "6 5",
+        interactive: true,
+      });
+      const members = group.slice().sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+      const memberList = members
+        .map(a => `<div style="font-size:11px;color:var(--muted);margin-top:3px">${escapeHtml(formatAnnDate(a.date))} · ${escapeHtml(a.address)}</div>`)
+        .join("");
+      circle.bindPopup(`
+        <div class="popup-inner">
+          <div class="name" style="color:#ff3e9a">Cluster of ${group.length} pins</div>
+          <div class="meta">${escapeHtml(span)}</div>
+          <div class="meta">~${Math.round(radius)} m radius · ${group.length} purchases</div>
+          ${memberList}
+        </div>`);
+      // Timeline integration
+      circle.on("popupopen", () => showClusterTimeline(members));
+      circle.on("popupclose", () => {
+        // Only hide the timeline if *this* cluster's popup is closing AND
+        // the user isn't in the middle of clicking a different one
+        if (activeClusterMembers === members) hideClusterTimeline();
+      });
+      circle.addTo(clusterLayer);
+    }
+    return clusters.length;
+  }
+
+  // --- Cluster timeline strip ---------------------------------------------
+  let activeClusterMembers = null;
+  const ctEl = document.getElementById("cluster-timeline");
+  const ctTrack = ctEl.querySelector(".ct-track");
+  const ctSummary = document.getElementById("ct-summary");
+  const ctMinLabel = document.getElementById("ct-min");
+  const ctMaxLabel = document.getElementById("ct-max");
+  document.getElementById("ct-close").addEventListener("click", () => {
+    map.closePopup();
+    hideClusterTimeline();
+  });
+
+  function showClusterTimeline(members) {
+    activeClusterMembers = members;
+    renderTimelineDots(members);
+    ctEl.classList.remove("hidden");
+  }
+
+  function renderTimelineDots(members) {
+    ctTrack.querySelectorAll(".ct-dot, .ct-today-marker").forEach(d => d.remove());
+    const dated = members.filter(a => a.date);
+    if (!dated.length) { hideClusterTimeline(); return; }
+
+    const toTime = s => new Date(s + "T12:00:00").getTime();
+    const times = dated.map(a => toTime(a.date));
+    const minT = Math.min(...times);
+    const clusterMaxT = Math.max(...times);
+    const now = Date.now();
+    // Always extend the track to today so the cluster's timing is visible
+    // in real calendar perspective, not compressed into its own window.
+    const maxT = Math.max(clusterMaxT, now);
+    const span = Math.max(maxT - minT, 1);
+
+    for (const a of dated) {
+      const pct = span === 1 ? 50 : ((toTime(a.date) - minT) / span) * 100;
+      const dot = document.createElement("div");
+      dot.className = "ct-dot";
+      dot.style.left = pct + "%";
+      dot.title = `${formatAnnDate(a.date)} — ${a.address}`;
+      dot.addEventListener("click", (e) => {
+        e.stopPropagation();
+        map.flyTo([a.lat, a.lon], 17, { duration: 0.5 });
+        const m = annotationMarkers.get(a.id);
+        if (m && annotationLayer.hasLayer(m)) setTimeout(() => m.openPopup(), 600);
+      });
+      ctTrack.appendChild(dot);
+    }
+
+    // Today marker (only when today sits within the track)
+    if (now >= minT && now <= maxT) {
+      const pct = ((now - minT) / span) * 100;
+      const mk = document.createElement("div");
+      mk.className = "ct-today-marker";
+      mk.style.cssText =
+        `position:absolute;top:-2px;bottom:-2px;left:${pct}%;width:2px;` +
+        `background:var(--text);opacity:0.6;transform:translateX(-1px);pointer-events:none;`;
+      const lbl = document.createElement("div");
+      lbl.textContent = "today";
+      lbl.style.cssText =
+        `position:absolute;top:-14px;left:${pct}%;transform:translateX(-50%);` +
+        `font-size:9px;color:var(--text);opacity:0.7;text-transform:uppercase;letter-spacing:0.08em;`;
+      ctTrack.appendChild(mk);
+      ctTrack.appendChild(lbl);
+    }
+
+    ctMinLabel.textContent = formatAnnDate(dated[0].date);
+    ctMaxLabel.textContent = now > clusterMaxT
+      ? "today"
+      : formatAnnDate(dated[dated.length - 1].date);
+    ctSummary.innerHTML = `· <b style="color:var(--text);font-weight:500">${dated.length} acquisitions</b> over ${daySpanLabel(minT, clusterMaxT)}`;
+  }
+
+  function hideClusterTimeline() {
+    activeClusterMembers = null;
+    ctEl.classList.add("hidden");
+  }
+
+  function daySpanLabel(minT, maxT) {
+    const days = Math.round((maxT - minT) / 86400000);
+    if (days === 0) return "the same day";
+    if (days < 60) return `${days} days`;
+    if (days < 730) return `${Math.round(days / 30)} months`;
+    return `${(days / 365).toFixed(1)} years`;
+  }
 
   function formatAnnDate(iso) {
     if (!iso) return "";
@@ -331,6 +580,7 @@
     // Annotation filtering — toggle + year range
     const annTogg = document.getElementById("toggle-ann");
     const annOn = annTogg && annTogg.checked;
+    const visibleAnns = [];
     let nAnn = 0;
     for (const [id, marker] of annotationMarkers) {
       const ann = annotationsData.get(id);
@@ -339,9 +589,23 @@
       if (show) {
         if (!annotationLayer.hasLayer(marker)) annotationLayer.addLayer(marker);
         nAnn++;
+        if (ann) visibleAnns.push(ann);
       } else if (annotationLayer.hasLayer(marker)) {
         annotationLayer.removeLayer(marker);
       }
+    }
+
+    // Cluster detection over the currently-visible pins
+    const clusterTogg = document.getElementById("toggle-clusters");
+    const epsEl = document.getElementById("cluster-eps");
+    const minEl2 = document.getElementById("cluster-minpts");
+    const clusterOn = clusterTogg && clusterTogg.checked && annOn;
+    if (clusterOn) {
+      const epsilonM = Math.max(100, parseInt(epsEl.value, 10) || 800);
+      const minPts = Math.max(2, parseInt(minEl2.value, 10) || 2);
+      renderClusters(visibleAnns, epsilonM, minPts);
+    } else {
+      clusterLayer.clearLayers();
     }
 
     readoutEl.textContent = lo === hi ? `${lo}` : `${lo} – ${hi}`;
@@ -366,6 +630,17 @@
   annotationLayer.addTo(map);
   const annToggle = document.getElementById("toggle-ann");
   annToggle.addEventListener("change", render);
+
+  // Cluster detection wiring
+  const clusterToggle = document.getElementById("toggle-clusters");
+  const clusterParams = document.getElementById("cluster-params");
+  const clusterEps = document.getElementById("cluster-eps");
+  const clusterMinPts = document.getElementById("cluster-minpts");
+  function syncClusterUi() { clusterParams.style.display = clusterToggle.checked ? "inline" : "none"; }
+  clusterToggle.addEventListener("change", () => { syncClusterUi(); render(); });
+  clusterEps.addEventListener("input", render);
+  clusterMinPts.addEventListener("input", render);
+  syncClusterUi();
 
   function updateCountDisplay() { render(); }
 
